@@ -1,6 +1,9 @@
 import os
 from typing import BinaryIO
-
+import re
+def decode_utf8_bytes_to_str_wrong(bytestring: bytes):
+    return "".join([bytes([b]).decode("utf-8") for b in bytestring])
+decode_utf8_bytes_to_str_wrong("hello".encode("utf-8"))
 
 def find_chunk_boundaries(
     file: BinaryIO,
@@ -24,15 +27,16 @@ def find_chunk_boundaries(
     # Chunks start on previous index, don't include last index
     chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
     chunk_boundaries[-1] = file_size
-
+    print(chunk_boundaries)
     mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
 
     for bi in range(1, len(chunk_boundaries) - 1):
         initial_position = chunk_boundaries[bi]
+        # print(initial_position)
+
         file.seek(initial_position)  # Start at boundary guess
         while True:
             mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
-
             # If EOF, this boundary should be at the end of the file
             if mini_chunk == b"":
                 chunk_boundaries[bi] = file_size
@@ -42,6 +46,7 @@ def find_chunk_boundaries(
             found_at = mini_chunk.find(split_special_token)
             if found_at != -1:
                 chunk_boundaries[bi] = initial_position + found_at
+                # print("yes", chunk_boundaries[bi])
                 break
             initial_position += mini_chunk_size
 
@@ -50,13 +55,21 @@ def find_chunk_boundaries(
 
 
 ## Usage
-with open(..., "rb") as f:
-    num_processes = 4
+with open("data/TinyStoriesV2-GPT4-train.txt", "rb") as f:
+    num_processes = 10
     boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
-
+    a = "<|endoftext|>"
     # The following is a serial implementation, but you can parallelize this
     # by sending each start/end pair to a set of processes.
+    workset = ""
     for start, end in zip(boundaries[:-1], boundaries[1:]):
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
+        # found_at = chunk.find(a)
+        indices = [m.start() + start for m in re.finditer(re.escape(a), chunk)]
+        workset = chunk
+        # if len(indices) != 0:
+        #     print(start, end, indices[-10:])
+        #Run pre-tokenization on your chunk and store the counts for each pre-token
+    print("=========================")
+    print(workset[:1000])

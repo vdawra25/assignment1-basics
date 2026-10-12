@@ -23,7 +23,8 @@ def test_train_bpe_speed():
     end_time = time.time()
     assert end_time - start_time < 1.5
 
-
+#gfcpd6529a25052001
+#RDLaYH.2p!C-Qm
 def test_train_bpe():
     input_path = FIXTURES_PATH / "corpus.en"
     vocab, merges = run_train_bpe(
@@ -47,6 +48,8 @@ def test_train_bpe():
             )
             for merge_token_1, merge_token_2 in gpt2_reference_merges
         ]
+        # print("expected ===>", reference_merges[500:501])
+        # print("obtained ===>", merges[500:501])
     assert merges == reference_merges
 
     # Compare the vocab to the expected output vocab
@@ -67,13 +70,14 @@ def test_train_bpe_special_tokens(snapshot):
     Ensure that the special tokens are added to the vocabulary and not
     merged with other tokens.
     """
+    print("here1")
     input_path = FIXTURES_PATH / "tinystories_sample_5M.txt"
     vocab, merges = run_train_bpe(
         input_path=input_path,
         vocab_size=1000,
         special_tokens=["<|endoftext|>"],
     )
-
+    # print("here2")
     # Check that the special token is not in the vocab
     vocabs_without_specials = [word for word in vocab.values() if word != b"<|endoftext|>"]
     for word_bytes in vocabs_without_specials:
@@ -86,3 +90,4 @@ def test_train_bpe_special_tokens(snapshot):
             "merges": merges,
         },
     )
+
