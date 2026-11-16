@@ -1,7 +1,7 @@
 # from __future__ import annotations
 
 import os
-from cs336_basics.trainbpe import train_bpe
+from cs336_basics.trainbpeparallelize import train_bpe
 # from collections.abc import Iterable
 # from typing import IO, Any, BinaryIO
 

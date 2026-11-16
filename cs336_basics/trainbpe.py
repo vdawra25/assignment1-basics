@@ -6,6 +6,7 @@ import time
 import cProfile
 import pstats
 import pprint
+# import tracemalloc
 @total_ordering
 class Item:
     def __init__(self, num, pair):
@@ -23,65 +24,73 @@ class Item:
         return f"({self.num}, {self.pair})"
 
 
+# placeholder written at the slot of the right-hand token after a merge
+SKIP = "<|endoftext|>"
+
+
+def next_idx(word, k):
+    """index of first non-SKIP element after k (len(word) if none)"""
+    k += 1
+    while k < len(word) and word[k] == SKIP:
+        k += 1
+    return k
+
+
+def prev_idx(word, k):
+    """index of first non-SKIP element before k (-1 if none)"""
+    k -= 1
+    while k >= 0 and word[k] == SKIP:
+        k -= 1
+    return k
+
+
 def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
     speical_tokens: list[str],
     **kwargs,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+
+    # tracemalloc.start()
     data = ""
     with open(input_path, "r") as f:
         data = f.read()
 
     outputs = re.split("|".join(re.escape(token) for token in speical_tokens),data)
+    del data
+
 
     sorted = SortedList()
     map1 = dict()
     map2 = dict()
-    offsets = list()
-    outputs_modified = list()
     start1 = time.time()
     print("output length =>", len(outputs))
     for i, output in enumerate(outputs):
-        if i%10000 == 0:
+        if i%50000 == 0:
             print("we at =>", i, "in time", time.time() - start1)
         # output = "hello world!! this is a beautiful morning"
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
         pre_tokens = re.findall(PAT, output)
-        offset_inner = list()
-        ouputs_inner = list()
         # print(pre_tokens)
         # pre_tokens =[hello, world, !, !, this, is, a, beatuiful, morning ]
-        for j, pre_token in enumerate(pre_tokens):
-            # pre_token= [hello]
-            # print(pre_token,  i, j)
+        for pre_token in pre_tokens:
             pre_token_bytes = pre_token.encode("utf-8")
-            offset_inner_inner = list()
-            outputs_inner_inner = list()
+            if pre_token_bytes in map2:
+                map2[pre_token_bytes]+=1
+            else:
+                map2[pre_token_bytes] = 1    
             for k in range(len(pre_token_bytes)):
-                outputs_inner_inner.append(bytes([pre_token_bytes[k]]))
-                offset_inner_inner.append(1)
                 if k == len(pre_token_bytes) - 1:
                     break
                 toLookup = (bytes([pre_token_bytes[k]]), bytes([pre_token_bytes[k+1]]))
-                # if toLookup == target:
-                #     print("yo yo yo yo")
                 if toLookup in map1:
-                    # sorted.discard(Item(val, toLookup))
                     map1[toLookup]+=1
-                    # sorted.add(Item(val + 1, toLookup))
-                    # if toLookup == (" ", "a"):
-                    #     print(val)
-            
-                    map2[toLookup].append((i, j, k))
                 else:
-                    # sorted.add(Item(1, toLookup))
-                    map2[toLookup] = [(i, j, k)]      
-                    map1[toLookup] = 1      
-            # offset_inner.append(offset_inner_inner)
-            # ouputs_inner.append(outputs_inner_inner)
-        offsets.append(offset_inner)
-        outputs_modified.append(ouputs_inner)    
+                    map1[toLookup] = 1
+    del outputs
+
+    #opt-1
+    # In map to, either just store sum of indexes or just store i, iterate on j and k. This way we also reduce memory required by offsets slice. 
     # print(outputs[0])
     # print(outputs_modified)
     # toDelete = list()
@@ -90,8 +99,11 @@ def train_bpe(
     end1 = time.time()
     print(end1 - start1)
     merges = list()
+    count = 0
+    merge_start = time.time()
     while 256 + len(merges) + len(speical_tokens) < vocab_size:
         # print("done")
+        count+=1
         item = sorted[0]
         # if val == 0:
         #     break
@@ -109,102 +121,83 @@ def train_bpe(
         # if val == 2940:
         #    debug = True  
         #    print("yo yo yo yo", val)
-        idxList = map2[toLookup].copy()
         merges.append(toLookup)
         # print("====>", item, cty)
         # if len(merges) > 10:
         #     break
         # if 256 + len(merges) + len(speical_tokens) > vocab_size:
         #     break
-        oldVals = map1.copy()
-        for idx in idxList:
-            i, j, k = idx
-            # if debug:
-                # print("navigating index =>", i,j,k)
-                # print("outputs_modfied =>", outputs_modified[i][j])
-            if outputs_modified[i][j][k] == "|<end of text>|":
-                continue
-            # print("navigating index =>", i,j,k)
-            # print("outputs_modfied =>", outputs_modified[i][j])
-            val = map1[toLookup]
-            map1[toLookup]-=1
-            if debug:
-                print("discarding item", toLookup)
-            # sorted.discard(Item(val, toLookup))
-            # sorted.add(Item(val-1, toLookup))
-            fwdIdx = k + len(token1) + len(token2)
-            outputs_modified[i][j][k] = token1 + token2
-            outputs_modified[i][j][k + len(token1)] = "|<end of text>|"
-            if fwdIdx < len(outputs_modified[i][j]):
-                offsets[i][j][fwdIdx] = offsets[i][j][fwdIdx] + offsets[i][j][k + len(token1)] 
-                toAdd = (token1+ token2 , outputs_modified[i][j][fwdIdx])
-                toRemove = (token2, outputs_modified[i][j][fwdIdx])
-                # print("fwdToAdd  =>", toAdd, "fwdToRemove", toRemove)
-                # operations for toAdd
-                currVal1 = map1.get(toAdd,  0)
-                map1[toAdd] =  map1.get(toAdd, 0) + 1
-                if currVal1 > 0:
-                    map2[toAdd].append((i,j,k))
-                    if debug:
-                        print("discarding item", toLookup)
-                    # sorted.discard(Item(currVal1, toAdd))
-                    # sorted.add(Item(currVal1 +1 , toAdd))
-                else:
-                    map2[toAdd] = [(i,j,k)]
-                    # sorted.add(Item(1, toAdd))
-
-
-                # operations for toRemove
-                currVal2 = map1[toRemove]
-                map1[toRemove]-=1
-                if debug:
-                    print("discarding item", toLookup)
-                # sorted.discard(Item(currVal2, toRemove))
-                # sorted.add(Item(currVal2-1, toRemove))
-                map2[toRemove].remove((i, j, k + len(token1)))
-            bwdIdx = k -  offsets[i][j][k]
-            if bwdIdx >= 0:
-                toAdd = (outputs_modified[i][j][bwdIdx], token1 + token2)
-                # if toAdd[0] == "?":
-                #     print("hereeeee")
-                toRemove =   (outputs_modified[i][j][bwdIdx], token1)
-                # print("bwdToAdd  =>", toAdd, "bwdToRemove", toRemove)
-                currVal1 = map1.get(toAdd, 0)
-                map1[toAdd] =  map1.get(toAdd, 0) + 1
-                if currVal1 > 0:
-                    # print("adding =>", toAdd, i, j, bwdIdx)
-                    map2[toAdd].append((i,j,bwdIdx))
-                    if debug:
-                        print("discarding item", toLookup)
-                    # sorted.discard(Item(currVal1, toAdd))
-                    # sorted.add(Item(currVal1 +1 , toAdd))
-                else:
-                    map2[toAdd] = [(i,j,bwdIdx)]
-                    # sorted.add(Item(1, toAdd))
-
-                # operations for toRemove
-                currVal2 = map1[toRemove]
-                map1[toRemove]-=1
-                if debug:
-                    print("added value => bwd", currVal2 - 1, toRemove)
-                if debug:
-                    print("discarding item", toLookup)    
-                # sorted.discard(Item(currVal2, toRemove))
-                # sorted.add(Item(currVal2 -1, toRemove))
-                map2[toRemove].remove((i, j, bwdIdx))
-
-        for k ,v in map1.items():
-            if k in oldVals:
-                old = oldVals[k]
-                if old != v:
-                    sorted.discard(Item(old, k))
-                    sorted.add(Item(v, k))  
+        # key -> [value before first change in this iteration, current value]
+        if count%100 == 0:
+            print("merge done")
+        changed = dict()
+        # old map2 key -> new map2 key, for pre-tokens whose segmentation changed in this merge
+        changed2 = dict()
+        merged = token1 + token2
+        for key, cnt in map2.items():
+            # keys start as raw bytes (iterating bytes yields ints), merged keys are tuples of tokens
+            if isinstance(key, tuple):
+                word = key
             else:
-                sorted.add(Item(v,k))           
+                word = tuple(bytes([b]) for b in key)
+            new_word = list()
+            found = False
+            k = 0
+            while k < len(word):
+                if not (k + 1 < len(word) and word[k] == token1 and word[k + 1] == token2):
+                    new_word.append(word[k])
+                    k += 1
+                    continue
+                found = True
+                if toLookup not in changed:
+                    changed[toLookup] = [map1[toLookup], None]
+                map1[toLookup] -= cnt
+                changed[toLookup][1] = map1[toLookup]
+
+                # backward neighbour: (prev, token1) -> (prev, merged)
+                if new_word:
+                    prev = new_word[-1]
+                    toRemove = (prev, token1)
+                    toAdd = (prev, merged)
+                    if toRemove not in changed:
+                        changed[toRemove] = [map1[toRemove], None]
+                    map1[toRemove] -= cnt
+                    changed[toRemove][1] = map1[toRemove]
+                    if toAdd not in changed:
+                        changed[toAdd] = [map1.get(toAdd, 0), None]
+                    map1[toAdd] = map1.get(toAdd, 0) + cnt
+                    changed[toAdd][1] = map1[toAdd]
+
+                # forward neighbour: (token2, next) -> (merged, next)
+                if k + 2 < len(word):
+                    nxt = word[k + 2]
+                    toRemove = (token2, nxt)
+                    toAdd = (merged, nxt)
+                    if toRemove not in changed:
+                        changed[toRemove] = [map1[toRemove], None]
+                    map1[toRemove] -= cnt
+                    changed[toRemove][1] = map1[toRemove]
+                    if toAdd not in changed:
+                        changed[toAdd] = [map1.get(toAdd, 0), None]
+                    map1[toAdd] = map1.get(toAdd, 0) + cnt
+                    changed[toAdd][1] = map1[toAdd]
+
+                new_word.append(merged)
+                k += 2
+            if found:
+                changed2[key] = tuple(new_word)
+
+        for old_key, new_key in changed2.items():
+            map2[new_key] = map2.pop(old_key)
+
+        for k, (old, new) in changed.items():
+            sorted.discard(Item(old, k))
+            sorted.add(Item(new, k))
         del map1[toLookup]
-        del map2[toLookup]
         sorted.discard(Item(0, pair))
 
+    merge_end = time.time()
+    print("merge completed in =>", merge_end - merge_start)
     #output 1 => dict [tokenID, bytes] (0, 255 => direct), utf-8 encoding for rest of them
     op1 = dict()
     for i in range(256):
@@ -256,44 +249,3 @@ train_bpe("data/TinyStoriesV2-GPT4-train.txt",10000,  ["<|endoftext|>"])
 # print("DONE")
 # print(end - start)
 # print(b[:10])
-
-# better allocation
-# we at => 0 in time 0.00026607513427734375
-# we at => 10000 in time 5.34400200843811
-# we at => 20000 in time 9.590490818023682
-# we at => 30000 in time 14.271063089370728
-# we at => 40000 in time 19.461002111434937
-# we at => 50000 in time 24.05393385887146
-# we at => 60000 in time 29.185837745666504
-# we at => 70000 in time 34.68720102310181
-# we at => 80000 in time 38.09470796585083
-# we at => 90000 in time 46.7525110244751
-# we at => 100000 in time 49.97850298881531
-
-# poor allocation
-# we at => 0 in time 0.00010991096496582031
-# we at => 10000 in time 5.262231111526489
-# we at => 20000 in time 9.56543493270874
-# we at => 30000 in time 13.896559953689575
-# we at => 40000 in time 17.949470043182373
-# we at => 50000 in time 22.264418125152588
-# we at => 60000 in time 26.9840829372406
-# we at => 70000 in time 32.76332902908325
-# we at => 80000 in time 36.28113007545471
-# we at => 90000 in time 42.9139769077301
-# we at => 100000 in time 46.46346688270569
-
-# with map lookup included
-
-
-# we at => 0 in time 0.00013589859008789062
-# we at => 10000 in time 5.2997517585754395
-# we at => 20000 in time 10.268961906433105
-# we at => 30000 in time 15.406102895736694
-# we at => 40000 in time 20.220227003097534
-# we at => 50000 in time 25.301964044570923
-# we at => 60000 in time 30.87917995452881
-# we at => 70000 in time 37.65780806541443
-# we at => 80000 in time 42.08470606803894
-# we at => 90000 in time 49.30053496360779
-# we at => 100000 in time 53.65579700469971
