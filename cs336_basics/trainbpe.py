@@ -66,7 +66,7 @@ def train_bpe(
     start1 = time.time()
     print("output length =>", len(outputs))
     for i, output in enumerate(outputs):
-        if i%50000 == 0:
+        if i%100000 == 0:
             print("we at =>", i, "in time", time.time() - start1)
         # output = "hello world!! this is a beautiful morning"
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -221,7 +221,7 @@ def train_bpe(
     "merges": merges,
     }
 
-    with open("tests/_snapshots/tiny_stories_full.txt", "w") as f:
+    with open("tests/_snapshots/tiny_stories_full1.txt", "w") as f:
         pprint.pprint(output, stream=f)
     return op1,result
 
